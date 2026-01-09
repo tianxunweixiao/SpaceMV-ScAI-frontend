@@ -1,0 +1,38 @@
+{
+  "short_name": "KeepTrack",
+  "name": "KeepTrack",
+  "description": "3D Satellite Toolkit",
+  "icons": [
+    {
+      "src": "./img/favicons/android-chrome-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./img/favicons/android-chrome-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "img/pwa/wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "KeepTrack"
+    },
+    {
+      "src": "img/pwa/square.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "label": "KeepTrack"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1f1f1f",
+  "display": "fullscreen",
+  "scope": "/",
+  "theme_color": "#dd382f"
+}

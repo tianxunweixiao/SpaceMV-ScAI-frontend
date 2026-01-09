@@ -1,0 +1,669 @@
+/**
+ * /////////////////////////////////////////////////////////////////////////////
+ *
+ * http://spacemv.com/
+ *
+ * @Copyright (C) 2025 Kruczek Labs LLC
+ * @Copyright (C) 2015-2016, James Yoder
+ *
+ * Original source code released by James Yoder at https://github.com/jeyoder/ThingsInSpace/
+ * under the MIT License. Please reference http://spacemv.com//license/thingsinspace.txt
+ *
+ * KeepTrack is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later version.
+ *
+ * KeepTrack is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along with
+ * KeepTrack. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * /////////////////////////////////////////////////////////////////////////////
+ */
+
+/* eslint-disable no-unreachable */
+
+import 'material-icons/iconfont/material-icons.css';
+
+import eruda, { ErudaConsole } from 'eruda';
+import { Milliseconds } from 'ootk';
+import { keepTrackContainer } from './container';
+import { KeepTrackApiEvents, Singletons } from './interfaces';
+import { keepTrackApi } from './keepTrackApi';
+import { getEl } from './lib/get-el';
+import { SelectSatManager } from './plugins/select-sat-manager/select-sat-manager';
+import { SensorManager } from './plugins/sensor/sensorManager';
+import { settingsManager, SettingsManagerOverride } from './settings/settings';
+import { VERSION } from './settings/version.js';
+import { Camera } from './singletons/camera';
+import { CameraControlWidget } from './singletons/camera-control-widget';
+import { CatalogManager } from './singletons/catalog-manager';
+import { ColorSchemeManager } from './singletons/color-scheme-manager';
+import { DemoManager } from './singletons/demo-mode';
+import { DotsManager } from './singletons/dots-manager';
+import { LineManager, lineManagerInstance } from './singletons/draw-manager/line-manager';
+import { ErrorManager, errorManagerInstance } from './singletons/errorManager';
+import { GroupsManager } from './singletons/groups-manager';
+import { HoverManager } from './singletons/hover-manager';
+import { InputManager } from './singletons/input-manager';
+import { OrbitManager } from './singletons/orbitManager';
+import { Scene } from './singletons/scene';
+import { TimeManager } from './singletons/time-manager';
+import { UiManager } from './singletons/uiManager';
+import { WebGLRenderer } from './singletons/webgl-renderer';
+import { BottomMenu } from './static/bottom-menu';
+import { CatalogLoader } from './static/catalog-loader';
+import { isThisNode } from './static/isThisNode';
+import { SensorMath } from './static/sensor-math';
+import { SplashScreen } from './static/splash-screen';
+
+export class KeepTrack {
+  isReady = false;
+  private isUpdateTimeThrottle_: boolean;
+  private lastGameLoopTimestamp_ = <Milliseconds>0;
+  private readonly settingsOverride_: SettingsManagerOverride;
+
+  colorManager: ColorSchemeManager;
+  demoManager: DemoManager;
+  dotsManager: DotsManager;
+  errorManager: ErrorManager;
+  lineManager: LineManager;
+  colorSchemeManager: ColorSchemeManager;
+  orbitManager: OrbitManager;
+  catalogManager: CatalogManager;
+  timeManager: TimeManager;
+  renderer: WebGLRenderer;
+  sensorManager: SensorManager;
+  uiManager: UiManager;
+  inputManager: InputManager;
+  mainCameraInstance: Camera;
+  cameraControlWidget: CameraControlWidget;
+
+  constructor(
+    settingsOverride: SettingsManagerOverride = {
+      isPreventDefaultHtml: false,
+      isShowSplashScreen: true,
+    },
+  ) {
+    if (this.isReady) {
+      throw new Error('KeepTrack is already started');
+    }
+
+    // Update the version number
+    settingsManager.versionNumber = VERSION;
+    this.settingsOverride_ = settingsOverride;
+  }
+
+  /**
+   * 初始化方法，用于设置和配置应用程序的各个组件和模块
+   */
+  /**
+   * 初始化 KeepTrack 应用程序的核心组件和设置。
+   * 此方法在应用程序启动时调用，负责设置全局配置、创建核心单例对象并初始化基本UI结构。
+   */
+  init() {
+    // 初始化全局设置管理器，应用构造函数传入的设置覆盖项
+    settingsManager.init(this.settingsOverride_);
+
+    // 设置应用程序的根容器元素
+    KeepTrack.setContainerElement();
+
+    // 如果没有禁止默认HTML结构，则初始化UI基础元素
+    if (!this.settingsOverride_.isPreventDefaultHtml) {
+      // 动态导入启动画面CSS
+      import(/* webpackMode: "eager" */ '@css/loading-screen.css');
+
+      // 生成并插入默认的HTML结构到页面
+      KeepTrack.getDefaultBodyHtml();
+
+      // 初始化底部菜单
+      BottomMenu.init();
+
+      // 如果不是在Node环境且启用了启动画面，则加载启动画面图片
+      if (!isThisNode() && settingsManager.isShowSplashScreen) {
+        SplashScreen.loadImages();
+      }
+    }
+
+    // === 创建并注册核心单例对象 ===
+
+    // 创建轨道管理器实例并注册为单例
+    const orbitManagerInstance = new OrbitManager();
+
+    keepTrackContainer.registerSingleton(Singletons.OrbitManager, orbitManagerInstance);
+
+    // 创建卫星目录管理器实例并注册为单例
+    const catalogManagerInstance = new CatalogManager();
+
+    keepTrackContainer.registerSingleton(Singletons.CatalogManager, catalogManagerInstance);
+
+    // 创建分组管理器实例并注册为单例
+    const groupManagerInstance = new GroupsManager();
+
+    keepTrackContainer.registerSingleton(Singletons.GroupsManager, groupManagerInstance);
+
+    // 创建时间管理器实例并注册为单例
+    const timeManagerInstance = new TimeManager();
+
+    keepTrackContainer.registerSingleton(Singletons.TimeManager, timeManagerInstance);
+
+    // 创建WebGL渲染器实例并注册为单例
+    const rendererInstance = new WebGLRenderer();
+
+    keepTrackContainer.registerSingleton(Singletons.WebGLRenderer, rendererInstance);
+    // 同时注册渲染器的网格管理器子组件
+    keepTrackContainer.registerSingleton(Singletons.MeshManager, rendererInstance.meshManager);
+
+    // 创建场景管理器实例并注册为单例（需要传入WebGL上下文）
+    const sceneInstance = new Scene({
+      gl: keepTrackApi.getRenderer().gl,
+    });
+
+    keepTrackContainer.registerSingleton(Singletons.Scene, sceneInstance);
+
+    // 创建传感器管理器实例并注册为单例
+    const sensorManagerInstance = new SensorManager();
+
+    keepTrackContainer.registerSingleton(Singletons.SensorManager, sensorManagerInstance);
+
+    // 创建点渲染管理器实例并注册为单例
+    const dotsManagerInstance = new DotsManager();
+
+    keepTrackContainer.registerSingleton(Singletons.DotsManager, dotsManagerInstance);
+
+    // 创建UI管理器实例并注册为单例
+    const uiManagerInstance = new UiManager();
+
+    keepTrackContainer.registerSingleton(Singletons.UiManager, uiManagerInstance);
+
+    // 创建颜色方案管理器实例并注册为单例
+    const colorSchemeManagerInstance = new ColorSchemeManager();
+
+    keepTrackContainer.registerSingleton(Singletons.ColorSchemeManager, colorSchemeManagerInstance);
+
+    // 创建输入管理器实例并注册为单例
+    const inputManagerInstance = new InputManager();
+
+    keepTrackContainer.registerSingleton(Singletons.InputManager, inputManagerInstance);
+
+    // 创建传感器数学计算实例并注册为单例
+    const sensorMathInstance = new SensorMath();
+
+    keepTrackContainer.registerSingleton(Singletons.SensorMath, sensorMathInstance);
+
+    // 创建主相机实例
+    const mainCameraInstance = new Camera();
+    // 创建相机控制部件实例
+    const cameraControlWidget = new CameraControlWidget();
+    // 保存相机控制部件引用
+
+    this.cameraControlWidget = cameraControlWidget;
+    // 注册主相机为单例
+    keepTrackContainer.registerSingleton(Singletons.MainCamera, mainCameraInstance);
+
+    // 创建悬停管理器实例并注册为单例
+    const hoverManagerInstance = new HoverManager();
+
+    keepTrackContainer.registerSingleton(Singletons.HoverManager, hoverManagerInstance);
+
+    // === 保存核心实例的直接引用，便于快速访问 ===
+
+    this.mainCameraInstance = mainCameraInstance;
+    this.errorManager = errorManagerInstance;
+    this.dotsManager = dotsManagerInstance;
+    this.lineManager = lineManagerInstance;
+    this.colorSchemeManager = colorSchemeManagerInstance;
+    this.orbitManager = orbitManagerInstance;
+    this.catalogManager = catalogManagerInstance;
+    this.timeManager = timeManagerInstance;
+    this.renderer = rendererInstance;
+    this.sensorManager = sensorManagerInstance;
+    this.uiManager = uiManagerInstance;
+    this.inputManager = inputManagerInstance;
+
+    // 创建演示模式管理器实例
+    this.demoManager = new DemoManager();
+  }
+
+  /** Check if the FPS is above a certain threshold */
+  static isFpsAboveLimit(dt: Milliseconds, minimumFps: number): boolean {
+    return KeepTrack.getFps_(dt) > minimumFps;
+  }
+
+  gameLoop(timestamp = <Milliseconds>0): void {
+    requestAnimationFrame(this.gameLoop.bind(this));
+    const dt = <Milliseconds>(timestamp - this.lastGameLoopTimestamp_);
+
+    this.lastGameLoopTimestamp_ = timestamp;
+
+    if (settingsManager.cruncherReady) {
+      this.update_(dt); // Do any per frame calculations
+      this.draw_(dt);
+
+      if ((keepTrackApi.getPlugin(SelectSatManager)?.selectedSat ?? -1) > -1) {
+        const selectedSatellite = keepTrackApi.getPlugin(SelectSatManager)?.primarySatObj;
+
+        if (selectedSatellite) {
+          keepTrackApi.getUiManager().updateSelectBox(this.timeManager.realTime, this.timeManager.lastBoxUpdateTime, selectedSatellite);
+        }
+      }
+    }
+  }
+
+  static getDefaultBodyHtml(): void {
+    if (!keepTrackApi.containerRoot) {
+      throw new Error('Container root is not set');
+    }
+
+    SplashScreen.initLoadingScreen(keepTrackApi.containerRoot);
+
+    keepTrackApi.containerRoot.id = 'keeptrack-root';
+    keepTrackApi.containerRoot.innerHTML += keepTrackApi.html`
+      <header>
+        <div id="keeptrack-header" class="start-hidden"></div>
+      </header>
+      <main>
+        <div id="rmb-wrapper"></div>
+        <div id="canvas-holder">
+        <div id="logo-primary" class="start-hidden">
+            <a href="http://spacemv.com/" target="_blank">
+              <img src="${settingsManager.installDirectory}img/logo-primary.png" alt="KeepTrack">
+            </a>
+          </div>
+          <div id="logo-secondary" class="start-hidden">
+            
+              <img src="${settingsManager.installDirectory}img/logo-secondary.png" alt="Celestrak">
+            
+          </div>
+          <canvas id="keeptrack-canvas"></canvas>
+          <div id="ui-wrapper">
+            <div id="sat-hoverbox">
+              <span id="sat-hoverbox1"></span>
+              <span id="sat-hoverbox2"></span>
+              <span id="sat-hoverbox3"></span>
+            </div>
+            <div id="sat-minibox"></div>
+
+            <div id="legend-hover-menu" class="start-hidden"></div>
+            <aside id="left-menus"></aside>
+          </div>
+        </div>
+        <figcaption id="info-overlays">
+          <div id="camera-status-box" class="start-hidden status-box">Earth Centered Camera Mode</div>
+          <div id="propRate-status-box" class="start-hidden status-box">Propagation Rate: 1.00x</div>
+        </figcaption>
+      </main>
+      <footer id="nav-footer" class="page-footer resizable">
+        <div id="footer-handle" class="ui-resizable-handle ui-resizable-n"></div>
+        <div id="footer-toggle-wrapper">
+          <div id="nav-footer-toggle">&#x25BC;</div>
+        </div>
+      </footer>`;
+
+    if (!settingsManager.isShowSplashScreen) {
+      /*
+       * hideEl('loading-screen');
+       * hideEl('nav-footer');
+       */
+    }
+  }
+
+  private static setContainerElement() {
+    // User provides the container using the settingsManager
+    const containerDom = settingsManager.containerRoot ?? (document.getElementById('keeptrack-root') as HTMLDivElement);
+
+    if (!containerDom) {
+      throw new Error('Failed to find container');
+    }
+
+    // If no current shadow DOM, create one - this is mainly for testing
+    if (!keepTrackApi.containerRoot) {
+      keepTrackApi.containerRoot = containerDom;
+    }
+  }
+
+  private static getFps_(dt: Milliseconds): number {
+    return 1000 / dt;
+  }
+
+  /* istanbul ignore next */
+  static async initCss(): Promise<void> {
+    try {
+      if (!isThisNode()) {
+        KeepTrack.printLogoToConsole_();
+      }
+
+      // Load the CSS
+      if (!settingsManager.isDisableCss) {
+        import('@css/fonts.css');
+        import(/* webpackMode: "eager" */ '@css/materialize.css').catch(() => {
+          // This is intentional
+        });
+        import(/* webpackMode: "eager" */ '@css/astroux/css/astro.css').catch(() => {
+          // This is intentional
+        });
+        import(/* webpackMode: "eager" */ '@css/materialize-local.css').catch(() => {
+          // This is intentional
+        });
+        import(/* webpackMode: "eager" */ '@css/style.css')
+          .then(
+            await import(/* webpackMode: "eager" */ '@css/responsive-sm.css').catch(() => {
+              // This is intentional
+            }),
+          )
+          .catch(() => {
+            // This is intentional
+          })
+          .then(
+            await import(/* webpackMode: "eager" */ '@css/responsive-md.css').catch(() => {
+              // This is intentional
+            }),
+          )
+          .catch(() => {
+            // This is intentional
+          })
+          .then(
+            await import(/* webpackMode: "eager" */ '@css/responsive-lg.css').catch(() => {
+              // This is intentional
+            }),
+          )
+          .catch(() => {
+            // This is intentional
+          })
+          .then(
+            await import(/* webpackMode: "eager" */ '@css/responsive-xl.css').catch(() => {
+              // This is intentional
+            }),
+          )
+          .catch(() => {
+            // This is intentional
+          })
+          .then(
+            await import(/* webpackMode: "eager" */ '@css/responsive-2xl.css').catch(() => {
+              // This is intentional
+            }),
+          )
+          .catch(() => {
+            // This is intentional
+          });
+      } else if (settingsManager.enableLimitedUI) {
+        import(/* webpackMode: "eager" */ '@css/limitedUI.css').catch(() => {
+          // This is intentional
+        });
+      }
+    } catch (e) {
+      // intentionally left blank
+    }
+  }
+
+  private static printLogoToConsole_() {
+    // eslint-disable-next-line no-console
+    console.log(`
+ _  __            _______             _       _____
+| |/ /           |__   __|           | |     / ____|
+| ' / ___  ___ _ __ | |_ __ __ _  ___| | __ | (___  _ __   __ _  ___ ___
+|  < / _ \\/ _ | '_ \\| | '__/ _\` |/ __| |/ /  \\___ \\| '_ \\ / _\` |/ __/ _ \\
+| . |  __|  __| |_) | | | | (_| | (__|   < _ ____) | |_) | (_| | (_|  __/
+|_|\\_\\___|\\___| .__/|_|_|  \\__,_|\\___|_|\\_(_|_____/| .__/ \\__,_|\\___\\___|
+              | |                                  | |
+              |_|                                  |_|
+##################################################################################
+Trying to figure out how the code works? Check out
+https://github.com/thkruz/keeptrack.space/ or send me an email at
+theodore.kruczek at gmail dot com.
+        `);
+  }
+
+  private static showErrorCode(error: Error & { lineNumber: number }): void {
+    // TODO: Replace console calls with ErrorManagerInstance
+
+    let errorHtml = '';
+
+    errorHtml += error?.message ? `${error.message}<br>` : '';
+    errorHtml += error?.lineNumber ? `Line: ${error.lineNumber}<br>` : '';
+    errorHtml += error?.stack ? `${error.stack}<br>` : '';
+    const LoaderText = getEl('loader-text');
+
+    if (LoaderText) {
+      LoaderText.innerHTML = errorHtml;
+      // eslint-disable-next-line no-console
+      console.error(error);
+    } else {
+      // eslint-disable-next-line no-console
+      console.error(error);
+    }
+    // istanbul ignore next
+    if (!isThisNode()) {
+      // eslint-disable-next-line no-console
+      console.warn(error);
+    }
+  }
+
+  private draw_(dt = <Milliseconds>0) {
+    const renderer = keepTrackApi.getRenderer();
+    const camera = keepTrackApi.getMainCamera();
+
+    camera.draw(keepTrackApi.getPlugin(SelectSatManager)?.primarySatObj, renderer.sensorPos);
+    renderer.render(keepTrackApi.getScene(), keepTrackApi.getMainCamera());
+
+    if (KeepTrack.isFpsAboveLimit(dt, 5) && !settingsManager.lowPerf && !settingsManager.isDragging && !settingsManager.isDemoModeOn) {
+      keepTrackApi.getOrbitManager().updateAllVisibleOrbits();
+      this.inputManager.update(dt);
+
+      // Only update hover if we are not on mobile
+      if (!settingsManager.isMobileModeEnabled) {
+        keepTrackApi.getHoverManager().setHoverId(this.inputManager.mouse.mouseSat, keepTrackApi.getMainCamera().mouseX, keepTrackApi.getMainCamera().mouseY);
+      }
+    }
+
+    // If Demo Mode do stuff
+    if (settingsManager.isDemoModeOn && keepTrackApi.getSensorManager()?.currentSensors[0]?.lat !== null) {
+      this.demoManager.update();
+    }
+
+    keepTrackApi.emit(KeepTrackApiEvents.endOfDraw, dt);
+  }
+
+  async run(): Promise<void> {
+    try {
+      const catalogManagerInstance = keepTrackApi.getCatalogManager();
+      const orbitManagerInstance = keepTrackApi.getOrbitManager();
+      const timeManagerInstance = keepTrackApi.getTimeManager();
+      const renderer = keepTrackApi.getRenderer();
+      const sceneInstance = keepTrackApi.getScene();
+      const dotsManagerInstance = keepTrackApi.getDotsManager();
+      const uiManagerInstance = keepTrackApi.getUiManager();
+      const colorSchemeManagerInstance = keepTrackApi.getColorSchemeManager();
+      const inputManagerInstance = keepTrackApi.getInputManager();
+
+      // Error Trapping
+      window.addEventListener('error', (e: ErrorEvent) => {
+        if (!settingsManager.isGlobalErrorTrapOn) {
+          return;
+        }
+        if (isThisNode()) {
+          throw e.error;
+        }
+        errorManagerInstance.error(e.error, 'Global Error Trapper', e.message);
+      });
+
+      keepTrackApi.getMainCamera().init(settingsManager);
+
+      SplashScreen.loadStr(SplashScreen.msg.science);
+
+      // Load all the plugins now that we have the API initialized
+      await import('./plugins/plugins')
+        .then((mod) => mod.loadPlugins(keepTrackApi, settingsManager.plugins))
+        .catch(() => {
+          // intentionally left blank
+        });
+
+      SplashScreen.loadStr(SplashScreen.msg.science2);
+      // Start initializing the rest of the website
+      timeManagerInstance.init();
+      uiManagerInstance.onReady();
+
+      SplashScreen.loadStr(SplashScreen.msg.dots);
+      /*
+       * MobileManager.checkMobileMode();
+       * We need to know if we are on a small screen before starting webgl
+       */
+      await renderer.glInit();
+
+      sceneInstance.init(renderer.gl);
+      sceneInstance.loadScene();
+
+      dotsManagerInstance.init(settingsManager);
+
+      catalogManagerInstance.initObjects();
+
+      catalogManagerInstance.init();
+      colorSchemeManagerInstance.init();
+
+      await CatalogLoader.load(); 
+      
+      await CatalogLoader.fetchAndCacheConstellations(); 
+
+      lineManagerInstance.init();
+
+      orbitManagerInstance.init(lineManagerInstance, renderer.gl);
+
+      uiManagerInstance.init();
+
+      dotsManagerInstance.initBuffers(colorSchemeManagerInstance.colorBuffer!);
+
+      inputManagerInstance.init();
+
+      await renderer.init(settingsManager);
+      renderer.meshManager.init(renderer.gl);
+
+      // Now that everything is loaded, start rendering to thg canvas
+      this.gameLoop();
+
+      this.postStart_();
+      this.isReady = true;
+    } catch (error) {
+      KeepTrack.showErrorCode(<Error & { lineNumber: number }>error);
+    }
+  }
+
+  private postStart_() {
+    // UI Changes after everything starts -- DO NOT RUN THIS EARLY IT HIDES THE CANVAS
+    UiManager.postStart();
+
+    if (settingsManager.cruncherReady) {
+      /*
+       * Create Container Div
+       * NOTE: This needs to be done before uiManagerFinal
+       */
+      if (settingsManager.plugins.DebugMenuPlugin) {
+        const uiWrapperDom = getEl('ui-wrapper');
+
+        if (uiWrapperDom) {
+          uiWrapperDom.innerHTML += '<div id="eruda"></div>';
+        }
+      }
+
+      if (settingsManager.isDisableCanvas) {
+        const canvasHolderDom = getEl('keeptrack-canvas');
+
+        if (canvasHolderDom) {
+          canvasHolderDom.style.display = 'none';
+        }
+      }
+
+      // Update any CSS now that we know what is loaded
+      keepTrackApi.emit(KeepTrackApiEvents.uiManagerFinal);
+
+      if (settingsManager.plugins.DebugMenuPlugin) {
+        const erudaDom = getEl('eruda');
+
+        if (erudaDom) {
+          eruda.init({
+            autoScale: false,
+            container: erudaDom,
+            useShadowDom: false,
+            tool: ['console', 'elements', 'network', 'resources', 'storage', 'sources', 'info', 'snippets'],
+          });
+          const console = eruda.get('console') as ErudaConsole;
+
+          console.config.set('catchGlobalErr', false);
+
+          const erudaContainerDom = getEl('eruda-console')?.parentElement?.parentElement;
+
+          if (erudaContainerDom) {
+            erudaContainerDom.style.top = 'calc(var(--top-menu-height) + 30px)';
+            erudaContainerDom.style.height = '80%';
+            erudaContainerDom.style.width = '60%';
+            erudaContainerDom.style.left = '20%';
+          }
+        }
+      }
+
+      keepTrackApi.getUiManager().initMenuController();
+
+      // Update MaterialUI with new menu options
+      try {
+        // Jest workaround
+        // eslint-disable-next-line new-cap
+        window.M.AutoInit();
+      } catch {
+        // intentionally left blank
+      }
+
+      window.addEventListener('resize', () => {
+        keepTrackApi.emit(KeepTrackApiEvents.resize);
+      });
+      keepTrackApi.emit(KeepTrackApiEvents.resize);
+
+      keepTrackApi.isInitialized = true;
+      keepTrackApi.emit(KeepTrackApiEvents.onKeepTrackReady);
+      if (settingsManager.onLoadCb) {
+        settingsManager.onLoadCb();
+      }
+    } else {
+      setTimeout(() => {
+        this.postStart_();
+      }, 100);
+    }
+  }
+
+  private update_(dt = <Milliseconds>0) {
+    const timeManagerInstance = keepTrackApi.getTimeManager();
+    const renderer = keepTrackApi.getRenderer();
+    const colorSchemeManagerInstance = keepTrackApi.getColorSchemeManager();
+
+    renderer.dt = dt;
+    renderer.dtAdjusted = <Milliseconds>(Math.min(renderer.dt / 1000.0, 1.0 / Math.max(timeManagerInstance.propRate, 0.001)) * timeManagerInstance.propRate);
+
+    this.timeManager.update();
+
+    keepTrackApi.emit(KeepTrackApiEvents.update, dt);
+
+    // Update official time for everyone else
+    timeManagerInstance.setNow(<Milliseconds>Date.now());
+    if (!this.isUpdateTimeThrottle_) {
+      this.isUpdateTimeThrottle_ = true;
+      timeManagerInstance.setSelectedDate(timeManagerInstance.simulationTimeObj);
+      setTimeout(() => {
+        this.isUpdateTimeThrottle_ = false;
+      }, 500);
+    }
+
+    // Update Draw Positions
+    keepTrackApi.getDotsManager().updatePositionBuffer();
+
+    renderer.update();
+
+    /*
+     * Update Colors
+     * NOTE: We used to skip this when isDragging was true, but its so efficient that doesn't seem necessary anymore
+     */
+    colorSchemeManagerInstance.calculateColorBuffers(false); // avoid recalculating ALL colors
+  }
+
+  // Make the api available
+  api = keepTrackApi;
+}

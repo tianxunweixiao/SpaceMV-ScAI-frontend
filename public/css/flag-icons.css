@@ -1,0 +1,23 @@
+.fi-unknown {
+    background-image: url(../flags/tbd.png);
+}
+
+.fi-cis {
+    background-image: url(../flags/cis.svg);
+}
+
+.fi-nato {
+    background-image: url(../flags/nato.png);
+}
+
+.fi-su {
+    background-image: url(../flags/ussr.png);
+}
+
+.fi-esa {
+    background-image: url(../flags/esa.png);
+}
+
+.fi-iss {
+    background-image: url(../flags/iss.png);
+}
